@@ -1,14 +1,12 @@
+import os
+os.environ["STREAMLIT_DISABLE_WATCHDOG_WARNINGS"] = "true"
 import cv2
 import streamlit as st
 import numpy as np
 import sys
-import os
 # Add the inner ultralytics folder to sys.path
 sys.path.insert(0, os.path.abspath('ultralytics'))
 from ultralytics import YOLO
-
-os.environ["STREAMLIT_DISABLE_WATCHDOG_WARNINGS"] = "true"
-
 
 # Load YOLO model
 @st.cache_resource
