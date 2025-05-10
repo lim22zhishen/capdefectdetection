@@ -107,7 +107,7 @@ def main():
             file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
             image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
             result_img, defects = detect_defects(image, bottle_model, defect_model, conf_threshold)
-            st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
+            st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width = True)
             st.subheader("Defect Summary")
             for defect in defects:
                 st.write(f"- **{defect['label']}** at {defect['coordinates']} with {defect['confidence']:.2f} confidence")
