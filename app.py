@@ -47,21 +47,24 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
         if score < conf_threshold or int(class_id) != 0:
             continue
         x1, y1, x2, y2 = map(int, box)
-        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        # Add padding around the bounding box
-        pad = 20  # Number of pixels to pad around the box
+
+        # Add padding
+        pad = 20
         height, width = frame.shape[:2]
         pad_x1 = max(x1 - pad, 0)
         pad_y1 = max(y1 - pad, 0)
         pad_x2 = min(x2 + pad, width)
         pad_y2 = min(y2 + pad, height)
-        
-        cropped_img = frame[pad_y1:pad_y2, pad_x1:pad_x2]
 
+        # Crop and preprocess
+        cropped_img = frame[pad_y1:pad_y2, pad_x1:pad_x2]
         cropped_img = apply_clahe(cropped_img)
         if cropped_img.size == 0:
             continue
+
         processed_img, scale_factor, new_w, new_h = preprocess(cropped_img)
+
+        # Run defect detection on the CLAHE image (use cropped_img, not processed_img)
         defect_results = defect_model(cropped_img)[0]
         for r_box, r_score, r_class_id in zip(
             defect_results.boxes.xyxy.cpu().numpy(),
@@ -71,18 +74,18 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
             if r_score < conf_threshold:
                 continue
             rx1, ry1, rx2, ry2 = map(int, r_box)
-            if rx1 >= new_w or ry1 >= new_h:
-                continue
-            rx1, ry1 = min(rx1, new_w), min(ry1, new_h)
-            rx2, ry2 = min(rx2, new_w), min(ry2, new_h)
-            orig_rx1 = int(rx1 / scale_factor)
-            orig_ry1 = int(ry1 / scale_factor)
-            orig_rx2 = int(rx2 / scale_factor)
-            orig_ry2 = int(ry2 / scale_factor)
-            abs_x1 = pad_x1 + orig_rx1
-            abs_y1 = pad_y1 + orig_ry1
-            abs_x2 = pad_x1 + orig_rx2
-            abs_y2 = pad_y1 + orig_ry2
+
+            # Clip to image size
+            crop_h, crop_w = cropped_img.shape[:2]
+            rx1, ry1 = min(rx1, crop_w), min(ry1, crop_h)
+            rx2, ry2 = min(rx2, crop_w), min(ry2, crop_h)
+
+            # Convert to original frame coordinates
+            abs_x1 = pad_x1 + rx1
+            abs_y1 = pad_y1 + ry1
+            abs_x2 = pad_x1 + rx2
+            abs_y2 = pad_y1 + ry2
+
             label = defect_model.names[int(r_class_id)]
             label_with_score = f"{label}: {r_score:.2f}"
             detected_defects.append({
@@ -93,6 +96,10 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
             cv2.rectangle(annotated_frame, (abs_x1, abs_y1), (abs_x2, abs_y2), (0, 0, 255), 2)
             cv2.putText(annotated_frame, label_with_score, (abs_x1, abs_y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+        # Optionally draw the bottle bounding box
+        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
     return annotated_frame, detected_defects
 
 def main():
