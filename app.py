@@ -48,13 +48,17 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
             continue
         x1, y1, x2, y2 = map(int, box)
 
-        # Add padding
-        pad = 30
+        # Add percentage-based padding (e.g., 10% of width/height of bounding box)
+        pad_percent = 0.1
+        box_w, box_h = x2 - x1, y2 - y1
+        pad_w, pad_h = int(box_w * pad_percent), int(box_h * pad_percent)
+        
         height, width = frame.shape[:2]
-        pad_x1 = max(x1 - pad, 0)
-        pad_y1 = max(y1 - pad, 0)
-        pad_x2 = min(x2 + pad, width)
-        pad_y2 = min(y2 + pad, height)
+        pad_x1 = max(x1 - pad_w, 0)
+        pad_y1 = max(y1 - pad_h, 0)
+        pad_x2 = min(x2 + pad_w, width)
+        pad_y2 = min(y2 + pad_h, height)
+
 
         # Crop and preprocess
         cropped_img = frame[pad_y1:pad_y2, pad_x1:pad_x2]
