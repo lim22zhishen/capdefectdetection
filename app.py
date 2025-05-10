@@ -49,7 +49,7 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
         x1, y1, x2, y2 = map(int, box)
 
         # Add padding
-        pad = 20
+        pad = 30
         height, width = frame.shape[:2]
         pad_x1 = max(x1 - pad, 0)
         pad_y1 = max(y1 - pad, 0)
