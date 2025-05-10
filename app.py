@@ -96,8 +96,8 @@ def main():
 
     # Load models
     with st.spinner("Loading models..."):
-        bottle_model = load_model('best.pt')
-        defect_model = load_model('defect_detection.pt')
+        bottle_model = load_model('best32.pt')
+        defect_model = load_model('best16.pt')
 
     upload_option = st.radio("Upload Type", ("Image", "Video"))
 
