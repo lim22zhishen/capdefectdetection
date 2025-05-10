@@ -12,6 +12,24 @@ from ultralytics import YOLO
 
 os.environ["STREAMLIT_DISABLE_WATCHDOG_WARNINGS"] = "true"
 
+def apply_clahe(img):
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    cl = clahe.apply(l)
+    merged = cv2.merge((cl, a, b))
+    return cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
+
+def preprocess(img, target_size=640) -> Tuple[np.ndarray, float, int, int]:
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    h, w = img.shape[:2]
+    scale = min(target_size / h, target_size / w)
+    new_w, new_h = int(w * scale), int(h * scale)
+    resized = cv2.resize(img, (new_w, new_h))
+    padded = np.full((target_size, target_size, 3), 114, dtype=np.uint8)
+    padded[:new_h, :new_w] = resized
+    return padded, scale, new_w, new_h
+
 @st.cache_resource
 def load_model(model_path: str) -> YOLO:
     return YOLO(model_path)
@@ -31,11 +49,11 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
         x1, y1, x2, y2 = map(int, box)
         cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
         cropped_img = frame[y1:y2, x1:x2]
+        cropped_img = apply_clahe(cropped_img)
         if cropped_img.size == 0:
             continue
-
-        # Direct inference without preprocessing
-        defect_results = defect_model(cropped_img)[0]
+        processed_img, scale_factor, new_w, new_h = preprocess(cropped_img)
+        defect_results = defect_model(processed_img)[0]
         for r_box, r_score, r_class_id in zip(
             defect_results.boxes.xyxy.cpu().numpy(),
             defect_results.boxes.conf.cpu().numpy(),
@@ -44,10 +62,18 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
             if r_score < conf_threshold:
                 continue
             rx1, ry1, rx2, ry2 = map(int, r_box)
-            abs_x1 = x1 + rx1
-            abs_y1 = y1 + ry1
-            abs_x2 = x1 + rx2
-            abs_y2 = y1 + ry2
+            if rx1 >= new_w or ry1 >= new_h:
+                continue
+            rx1, ry1 = min(rx1, new_w), min(ry1, new_h)
+            rx2, ry2 = min(rx2, new_w), min(ry2, new_h)
+            orig_rx1 = int(rx1 / scale_factor)
+            orig_ry1 = int(ry1 / scale_factor)
+            orig_rx2 = int(rx2 / scale_factor)
+            orig_ry2 = int(ry2 / scale_factor)
+            abs_x1 = x1 + orig_rx1
+            abs_y1 = y1 + orig_ry1
+            abs_x2 = x1 + orig_rx2
+            abs_y2 = y1 + orig_ry2
             label = defect_model.names[int(r_class_id)]
             label_with_score = f"{label}: {r_score:.2f}"
             detected_defects.append({
@@ -81,7 +107,7 @@ def main():
             file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
             image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
             result_img, defects = detect_defects(image, bottle_model, defect_model, conf_threshold)
-            st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+            st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width = True)
             st.subheader("Defect Summary")
             for defect in defects:
                 st.write(f"- **{defect['label']}** at {defect['coordinates']} with {defect['confidence']:.2f} confidence")
