@@ -48,7 +48,19 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
             continue
         x1, y1, x2, y2 = map(int, box)
         cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cropped_img = frame[y1:y2, x1:x2]
+        # Expand box by a margin (e.g., 10% of width and height)
+        margin_x = int(0.1 * (x2 - x1))
+        margin_y = int(0.1 * (y2 - y1))
+        
+        # New coordinates with boundary checks
+        exp_x1 = max(0, x1 - margin_x)
+        exp_y1 = max(0, y1 - margin_y)
+        exp_x2 = min(frame.shape[1], x2 + margin_x)
+        exp_y2 = min(frame.shape[0], y2 + margin_y)
+        
+        # Crop expanded region
+        cropped_img = frame[exp_y1:exp_y2, exp_x1:exp_x2]
+
         cropped_img = apply_clahe(cropped_img)
         if cropped_img.size == 0:
             continue
@@ -70,10 +82,10 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
             orig_ry1 = int(ry1 / scale_factor)
             orig_rx2 = int(rx2 / scale_factor)
             orig_ry2 = int(ry2 / scale_factor)
-            abs_x1 = x1 + orig_rx1
-            abs_y1 = y1 + orig_ry1
-            abs_x2 = x1 + orig_rx2
-            abs_y2 = y1 + orig_ry2
+            abs_x1 = exp_x1 + orig_rx1
+            abs_y1 = exp_y1 + orig_ry1
+            abs_x2 = exp_x1 + orig_rx2
+            abs_y2 = exp_y1 + orig_ry2
             label = defect_model.names[int(r_class_id)]
             label_with_score = f"{label}: {r_score:.2f}"
             detected_defects.append({
