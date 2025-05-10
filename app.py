@@ -118,7 +118,7 @@ def main():
 
     # Load models
     with st.spinner("Loading models..."):
-        cap_model = load_model('best_caps.pt')   # model for detecting caps
+        cap_model = load_model('best32.pt')   # model for detecting caps
         defect_model = load_model('best16.pt')   # model for detecting cap defects
 
     upload_option = st.radio("Upload Type", ("Image", "Video"))
