@@ -49,7 +49,7 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
         x1, y1, x2, y2 = map(int, box)
 
         # Add percentage-based padding (e.g., 10% of width/height of bounding box)
-        pad_percent = 0.1
+        pad_percent = 0.2
         box_w, box_h = x2 - x1, y2 - y1
         pad_w, pad_h = int(box_w * pad_percent), int(box_h * pad_percent)
         
