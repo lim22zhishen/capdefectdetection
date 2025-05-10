@@ -49,11 +49,11 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
         x1, y1, x2, y2 = map(int, box)
         cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
         cropped_img = frame[y1:y2, x1:x2]
-        cropped_img = apply_clahe(cropped_img)
+        #cropped_img = apply_clahe(cropped_img)
         if cropped_img.size == 0:
             continue
-        processed_img, scale_factor, new_w, new_h = preprocess(cropped_img)
-        defect_results = defect_model(processed_img)[0]
+        #processed_img, scale_factor, new_w, new_h = preprocess(cropped_img)
+        defect_results = defect_model(cropped_img)[0]
         for r_box, r_score, r_class_id in zip(
             defect_results.boxes.xyxy.cpu().numpy(),
             defect_results.boxes.conf.cpu().numpy(),
