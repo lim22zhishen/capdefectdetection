@@ -13,6 +13,7 @@ from ultralytics import YOLO
 os.environ["STREAMLIT_DISABLE_WATCHDOG_WARNINGS"] = "true"
 
 def apply_clahe(img):
+    """Apply Contrast Limited Adaptive Histogram Equalization to enhance image contrast."""
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -20,70 +21,98 @@ def apply_clahe(img):
     merged = cv2.merge((cl, a, b))
     return cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
 
-def preprocess(img, target_size=640) -> Tuple[np.ndarray, float, int, int]:
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    h, w = img.shape[:2]
-    scale = min(target_size / h, target_size / w)
-    new_w, new_h = int(w * scale), int(h * scale)
-    resized = cv2.resize(img, (new_w, new_h))
-    padded = np.full((target_size, target_size, 3), 114, dtype=np.uint8)
-    padded[:new_h, :new_w] = resized
-    return padded, scale, new_w, new_h
-
 @st.cache_resource
 def load_model(model_path: str) -> YOLO:
+    """Load and cache a YOLO model."""
     return YOLO(model_path)
 
 def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO, 
                   conf_threshold: float = 0.5) -> Tuple[np.ndarray, List[Dict]]:
+    """
+    Two-stage detection: first detect bottles, then detect defects within each bottle.
+    
+    Args:
+        frame: Input image
+        bottle_model: YOLO model for bottle detection
+        defect_model: YOLO model for defect detection
+        conf_threshold: Confidence threshold for detections
+        
+    Returns:
+        Annotated frame and list of detected defects
+    """
     annotated_frame = frame.copy()
     detected_defects = []
+    
+    # First stage: Detect bottles
     first_stage_results = bottle_model(frame)[0]
-    boxes = first_stage_results.boxes.xyxy.cpu().numpy()
-    scores = first_stage_results.boxes.conf.cpu().numpy()
-    classes = first_stage_results.boxes.cls.cpu().numpy()
-
-    for box, score, class_id in zip(boxes, scores, classes):
-        if score < conf_threshold or int(class_id) != 0:
+    bottles = first_stage_results.boxes
+    
+    # Process each detected bottle
+    for bottle in bottles:
+        bottle_box = bottle.xyxy.cpu().numpy()[0]
+        bottle_score = float(bottle.conf.cpu().numpy()[0])
+        bottle_class = int(bottle.cls.cpu().numpy()[0])
+        
+        # Skip if confidence is low or not a bottle
+        if bottle_score < conf_threshold or bottle_class != 0:
             continue
-        x1, y1, x2, y2 = map(int, box)
+            
+        # Extract bottle coordinates and draw bounding box
+        x1, y1, x2, y2 = map(int, bottle_box)
         cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        
+        # Crop the bottle region
         cropped_img = frame[y1:y2, x1:x2]
-        cropped_img = apply_clahe(cropped_img)
         if cropped_img.size == 0:
             continue
-        processed_img, scale_factor, new_w, new_h = preprocess(cropped_img)
-        defect_results = defect_model(cropped_img)[0]
-        for r_box, r_score, r_class_id in zip(
-            defect_results.boxes.xyxy.cpu().numpy(),
-            defect_results.boxes.conf.cpu().numpy(),
-            defect_results.boxes.cls.cpu().numpy()
-        ):
-            if r_score < conf_threshold:
+            
+        # Apply CLAHE to enhance contrast in the cropped image
+        enhanced_img = apply_clahe(cropped_img)
+        
+        # Second stage: Detect defects within the bottle region
+        # Use the enhanced image directly without preprocessing
+        defect_results = defect_model(enhanced_img)[0]
+        
+        # Process each detected defect
+        for defect in defect_results.boxes:
+            defect_box = defect.xyxy.cpu().numpy()[0]
+            defect_score = float(defect.conf.cpu().numpy()[0])
+            defect_class = int(defect.cls.cpu().numpy()[0])
+            
+            # Skip if confidence is low
+            if defect_score < conf_threshold:
                 continue
-            rx1, ry1, rx2, ry2 = map(int, r_box)
-            if rx1 >= new_w or ry1 >= new_h:
-                continue
-            rx1, ry1 = min(rx1, new_w), min(ry1, new_h)
-            rx2, ry2 = min(rx2, new_w), min(ry2, new_h)
-            orig_rx1 = int(rx1 / scale_factor)
-            orig_ry1 = int(ry1 / scale_factor)
-            orig_rx2 = int(rx2 / scale_factor)
-            orig_ry2 = int(ry2 / scale_factor)
-            abs_x1 = x1 + orig_rx1
-            abs_y1 = y1 + orig_ry1
-            abs_x2 = x1 + orig_rx2
-            abs_y2 = y1 + orig_ry2
-            label = defect_model.names[int(r_class_id)]
-            label_with_score = f"{label}: {r_score:.2f}"
+                
+            # Get defect coordinates within the cropped image
+            rx1, ry1, rx2, ry2 = map(int, defect_box)
+            
+            # Make sure coordinates are within the cropped image bounds
+            h, w = cropped_img.shape[:2]
+            rx1, ry1 = max(0, rx1), max(0, ry1)
+            rx2, ry2 = min(w, rx2), min(h, ry2)
+            
+            # Calculate absolute coordinates in the original image
+            abs_x1 = x1 + rx1
+            abs_y1 = y1 + ry1
+            abs_x2 = x1 + rx2
+            abs_y2 = y1 + ry2
+            
+            # Get defect label and format display text
+            label = defect_model.names[defect_class]
+            label_with_score = f"{label}: {defect_score:.2f}"
+            
+            # Store defect information
             detected_defects.append({
                 "label": label,
-                "confidence": float(r_score),
+                "confidence": defect_score,
                 "coordinates": [abs_x1, abs_y1, abs_x2, abs_y2]
             })
+            
+            # Draw defect bounding box and label on the annotated frame
             cv2.rectangle(annotated_frame, (abs_x1, abs_y1), (abs_x2, abs_y2), (0, 0, 255), 2)
             cv2.putText(annotated_frame, label_with_score, (abs_x1, abs_y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                        
     return annotated_frame, detected_defects
 
 def main():
@@ -106,34 +135,68 @@ def main():
         if uploaded_file:
             file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
             image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+            
+            # Display original image
+            st.subheader("Original Image")
+            st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+            
+            # Process image and display results
             result_img, defects = detect_defects(image, bottle_model, defect_model, conf_threshold)
-            st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width = True)
-            st.subheader("Defect Summary")
-            for defect in defects:
-                st.write(f"- **{defect['label']}** at {defect['coordinates']} with {defect['confidence']:.2f} confidence")
+            st.subheader("Detected Defects")
+            st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+            
+            # Display defect summary
+            if defects:
+                st.subheader("Defect Summary")
+                for i, defect in enumerate(defects, 1):
+                    st.write(f"{i}. **{defect['label']}** with {defect['confidence']:.2f} confidence")
+            else:
+                st.info("No defects detected with the current confidence threshold.")
 
     else:  # Video upload
         uploaded_video = st.file_uploader("Upload a Video", type=["mp4", "mov", "avi"])
         if uploaded_video:
             tfile = tempfile.NamedTemporaryFile(delete=False)
             tfile.write(uploaded_video.read())
+            
+            # Process video
+            st.subheader("Video Analysis")
             cap = cv2.VideoCapture(tfile.name)
             stframe = st.empty()
             defect_counts = {}
+            frame_count = 0
+            
+            progress_bar = st.progress(0)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
                     break
+                    
                 annotated_frame, defects = detect_defects(frame, bottle_model, defect_model, conf_threshold)
+                
+                # Update defect counts
                 for d in defects:
                     defect_counts[d['label']] = defect_counts.get(d['label'], 0) + 1
+                
+                # Display current frame
                 stframe.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB), channels="RGB")
+                
+                # Update progress
+                frame_count += 1
+                progress_bar.progress(min(frame_count / total_frames, 1.0))
+                
             cap.release()
+            os.unlink(tfile.name)
 
+            # Display defect summary for video
             st.subheader("Video Defect Summary")
-            for label, count in defect_counts.items():
-                st.write(f"- **{label}**: {count}")
+            if defect_counts:
+                for label, count in defect_counts.items():
+                    st.write(f"- **{label}**: {count} occurrences")
+            else:
+                st.info("No defects detected with the current confidence threshold.")
 
 if __name__ == "__main__":
     main()
