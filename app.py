@@ -34,11 +34,12 @@ def preprocess(img, target_size=640) -> Tuple[np.ndarray, float, int, int]:
 def load_model(model_path: str) -> YOLO:
     return YOLO(model_path)
 
-def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO, 
-                  conf_threshold: float = 0.5) -> Tuple[np.ndarray, List[Dict]]:
+def detect_defects(frame: np.ndarray, cap_model: YOLO, defect_model: YOLO, 
+                   conf_threshold: float = 0.5, padding: int = 10) -> Tuple[np.ndarray, List[Dict]]:
     annotated_frame = frame.copy()
     detected_defects = []
-    first_stage_results = bottle_model(frame)[0]
+    
+    first_stage_results = cap_model(frame)[0]
     boxes = first_stage_results.boxes.xyxy.cpu().numpy()
     scores = first_stage_results.boxes.conf.cpu().numpy()
     classes = first_stage_results.boxes.cls.cpu().numpy()
@@ -46,14 +47,26 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
     for box, score, class_id in zip(boxes, scores, classes):
         if score < conf_threshold or int(class_id) != 0:
             continue
+
+        h, w = frame.shape[:2]
         x1, y1, x2, y2 = map(int, box)
-        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cropped_img = frame[y1:y2, x1:x2]
-        cropped_img = apply_clahe(cropped_img)
-        if cropped_img.size == 0:
+        # Add padding while staying within image boundaries
+        x1 = max(0, x1 - padding)
+        y1 = max(0, y1 - padding)
+        x2 = min(w, x2 + padding)
+        y2 = min(h, y2 + padding)
+
+        # Mask the background
+        masked_frame = np.zeros_like(frame)
+        masked_frame[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
+
+        masked_roi = apply_clahe(masked_frame[y1:y2, x1:x2])
+        if masked_roi.size == 0:
             continue
-        processed_img, scale_factor, new_w, new_h = preprocess(cropped_img)
+
+        processed_img, scale_factor, new_w, new_h = preprocess(masked_roi)
         defect_results = defect_model(processed_img)[0]
+
         for r_box, r_score, r_class_id in zip(
             defect_results.boxes.xyxy.cpu().numpy(),
             defect_results.boxes.conf.cpu().numpy(),
@@ -61,43 +74,52 @@ def detect_defects(frame: np.ndarray, bottle_model: YOLO, defect_model: YOLO,
         ):
             if r_score < conf_threshold:
                 continue
+
             rx1, ry1, rx2, ry2 = map(int, r_box)
-            if rx1 >= new_w or ry1 >= new_h:
-                continue
             rx1, ry1 = min(rx1, new_w), min(ry1, new_h)
             rx2, ry2 = min(rx2, new_w), min(ry2, new_h)
+
             orig_rx1 = int(rx1 / scale_factor)
             orig_ry1 = int(ry1 / scale_factor)
             orig_rx2 = int(rx2 / scale_factor)
             orig_ry2 = int(ry2 / scale_factor)
+
             abs_x1 = x1 + orig_rx1
             abs_y1 = y1 + orig_ry1
             abs_x2 = x1 + orig_rx2
             abs_y2 = y1 + orig_ry2
+
             label = defect_model.names[int(r_class_id)]
             label_with_score = f"{label}: {r_score:.2f}"
+
             detected_defects.append({
                 "label": label,
                 "confidence": float(r_score),
                 "coordinates": [abs_x1, abs_y1, abs_x2, abs_y2]
             })
+
             cv2.rectangle(annotated_frame, (abs_x1, abs_y1), (abs_x2, abs_y2), (0, 0, 255), 2)
             cv2.putText(annotated_frame, label_with_score, (abs_x1, abs_y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+        # Draw cap bounding box
+        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
     return annotated_frame, detected_defects
 
 def main():
-    st.set_page_config(page_title="Bottle Defects Detection", layout="wide")
-    st.title("🧪 Bottle Defects Detection System")
-    st.markdown("Upload an image or video for analysis using a two-stage YOLO-based detector.")
+    st.set_page_config(page_title="Cap Defect Detection", layout="wide")
+    st.title("🥤 Bottle Cap Defect Detection System")
+    st.markdown("Upload an image or video for analysis using a two-stage YOLO-based system (cap → defects).")
 
-    # Sidebar settings
+    # Sidebar controls
     conf_threshold = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.5, 0.05)
+    padding = st.sidebar.slider("Padding Around Cap (px)", 0, 50, 10, 5)
 
     # Load models
     with st.spinner("Loading models..."):
-        bottle_model = load_model('best32.pt')
-        defect_model = load_model('best16.pt')
+        cap_model = load_model('best_caps.pt')   # model for detecting caps
+        defect_model = load_model('best16.pt')   # model for detecting cap defects
 
     upload_option = st.radio("Upload Type", ("Image", "Video"))
 
@@ -106,8 +128,8 @@ def main():
         if uploaded_file:
             file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
             image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-            result_img, defects = detect_defects(image, bottle_model, defect_model, conf_threshold)
-            st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width = True)
+            result_img, defects = detect_defects(image, cap_model, defect_model, conf_threshold, padding)
+            st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
             st.subheader("Defect Summary")
             for defect in defects:
                 st.write(f"- **{defect['label']}** at {defect['coordinates']} with {defect['confidence']:.2f} confidence")
@@ -125,7 +147,7 @@ def main():
                 ret, frame = cap.read()
                 if not ret:
                     break
-                annotated_frame, defects = detect_defects(frame, bottle_model, defect_model, conf_threshold)
+                annotated_frame, defects = detect_defects(frame, cap_model, defect_model, conf_threshold, padding)
                 for d in defects:
                     defect_counts[d['label']] = defect_counts.get(d['label'], 0) + 1
                 stframe.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB), channels="RGB")
