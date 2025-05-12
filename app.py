@@ -122,36 +122,36 @@ def main():
 
     upload_option = st.radio("Upload Type", ("Image", "Video"))
 
-if upload_option == "Image":
-    uploaded_file = st.file_uploader("Upload an Image", type=["jpg", "jpeg", "png"])
+    if upload_option == "Image":
+        uploaded_file = st.file_uploader("Upload an Image", type=["jpg", "jpeg", "png"])
 
-    # Sidebar: Sample image selector
-    image_paths = glob.glob("images/*.jpg")
-    image_names = [os.path.basename(path) for path in image_paths]
-    sample_option = st.sidebar.selectbox("Or choose a sample image", ["None"] + image_names)
+        # Sidebar: Sample image selector
+        image_paths = glob.glob("images/*.jpg")
+        image_names = [os.path.basename(path) for path in image_paths]
+        sample_option = st.sidebar.selectbox("Or choose a sample image", ["None"] + image_names)
 
-    # Handle uploaded image
-    if uploaded_file:
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        result_img, defects = detect_defects(image, bottle_model, defect_model, conf_threshold)
-        st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
-        st.subheader("Defect Summary")
-        for defect in defects:
-            st.write(f"- **{defect['label']}** at {defect['coordinates']} with {defect['confidence']:.2f} confidence")
-
-    # Handle sample image if no uploaded file
-    elif sample_option != "None":
-        sample_path = os.path.join("images", sample_option)
-        image = cv2.imread(sample_path)
-        if image is not None:
+        # Handle uploaded image
+        if uploaded_file:
+            file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+            image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
             result_img, defects = detect_defects(image, bottle_model, defect_model, conf_threshold)
             st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
             st.subheader("Defect Summary")
             for defect in defects:
                 st.write(f"- **{defect['label']}** at {defect['coordinates']} with {defect['confidence']:.2f} confidence")
-        else:
-            st.warning("Could not load the selected sample image.")
+
+        # Handle sample image if no uploaded file
+        elif sample_option != "None":
+            sample_path = os.path.join("images", sample_option)
+            image = cv2.imread(sample_path)
+            if image is not None:
+                result_img, defects = detect_defects(image, bottle_model, defect_model, conf_threshold)
+                st.image(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+                st.subheader("Defect Summary")
+                for defect in defects:
+                    st.write(f"- **{defect['label']}** at {defect['coordinates']} with {defect['confidence']:.2f} confidence")
+            else:
+                st.warning("Could not load the selected sample image.")
 
     else:  # Video upload
         uploaded_video = st.file_uploader("Upload a Video", type=["mp4", "mov", "avi"])
@@ -175,6 +175,7 @@ if upload_option == "Image":
             st.subheader("Video Defect Summary")
             for label, count in defect_counts.items():
                 st.write(f"- **{label}**: {count}")
+
 
 if __name__ == "__main__":
     main()
